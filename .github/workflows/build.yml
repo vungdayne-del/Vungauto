@@ -20,6 +20,19 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Show repository structure
+        run: |
+          echo "Repository root:"
+          pwd
+          echo "Files and directories:"
+          ls -la
+          echo "Gradle files:"
+          find . -maxdepth 5 \
+            \( -name gradlew \
+            -o -name settings.gradle \
+            -o -name settings.gradle.kts \) \
+            -not -path './.git/*' -print
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -30,13 +43,47 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build debug APK
-        working-directory: android
-        run: gradle assembleDebug
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleDebug
+          elif [ -f "./android/gradlew" ]; then
+            cd android
+            chmod +x ./gradlew
+            ./gradlew assembleDebug
+          elif [ -f "./settings.gradle.kts" ] || [ -f "./settings.gradle" ]; then
+            gradle assembleDebug
+          elif [ -f "./android/settings.gradle.kts" ] || [ -f "./android/settings.gradle" ]; then
+            cd android
+            gradle assembleDebug
+          else
+            echo "::error::Không tìm thấy Gradle project. Kiểm tra vị trí settings.gradle(.kts) và gradlew."
+            exit 1
+          fi
+
+      - name: Locate APK
+        id: apk
+        shell: bash
+        run: |
+          APK_PATH="$(find . -type f \
+            -path '*/build/outputs/apk/debug/*.apk' \
+            -not -path './.git/*' | head -n 1)"
+
+          if [ -z "$APK_PATH" ]; then
+            echo "::error::Build kết thúc nhưng không tìm thấy file APK."
+            exit 1
+          fi
+
+          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "APK found: $APK_PATH"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: vung-facebook-ai-auto-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
           retention-days: 14
